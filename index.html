@@ -462,8 +462,22 @@ function domCap(kids){return Math.min(12000+1500*kids,15000);}
 function domCredit(D,kids){return 0.5*Math.min(D,domCap(kids));}
 function gardeCredit(D,kids6){return 0.5*Math.min(D,3500*kids6);}
 function partsOf(couple,kids){return (couple?2:1)+Math.min(kids,2)*0.5+Math.max(0,kids-2);}
+/* Date d'achat lue dans le libellé d'une opération par carte (ex : « CARTE X3134 08/09 AUCHAN »), utile pour les cartes à débit différé. */
+function extractBuyDate(raw,opDate){
+  if(!raw||!opDate||!/\b(carte|cb|paiement|achat)\b/i.test(String(raw)))return '';
+  var m=String(raw).match(/(?:^|[^\d\/])(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?(?![\d\/])/);
+  if(!m)return '';
+  var d=+m[1],mo=+m[2],oy=+opDate.slice(0,4),y=oy;
+  if(mo<1||mo>12||d<1||d>31)return '';
+  if(m[3]){y=m[3].length===2?2000+(+m[3]):+m[3];}
+  var c=new Date(Date.UTC(y,mo-1,d));if(c.getUTCMonth()!==mo-1)return '';
+  var od=new Date(opDate+'T12:00:00Z');
+  if(!m[3]&&c.getTime()>od.getTime()+3*864e5)c=new Date(Date.UTC(y-1,mo-1,d));
+  if(isNaN(c)||od.getTime()-c.getTime()>120*864e5||c.getTime()-od.getTime()>3*864e5)return '';
+  return c.getUTCFullYear()+'-'+String(c.getUTCMonth()+1).padStart(2,'0')+'-'+String(c.getUTCDate()).padStart(2,'0');
+}
 // </pure>
-if(typeof window==='undefined'){module.exports={categorize:categorize,parseCSV:parseCSV,parseOFX:parseOFX,parseAmt:parseAmt,parseDate:parseDate,fv:fv,taxIR:taxIR,tmiOf:tmiOf,perCap:perCap,perSaving:perSaving,donsCredit:donsCredit,domCredit:domCredit,gardeCredit:gardeCredit,partsOf:partsOf,taxFull:taxFull,abatt10:abatt10,loanPmt:loanPmt,loanCRD:loanCRD,loanMonthsLeft:loanMonthsLeft,keyOf:keyOf,canon:canon,defaultCats:defaultCats,labelKey:labelKey,tokens:tokens,merchHit:merchHit,cleanLabel:cleanLabel,signFor:signFor};return;}
+if(typeof window==='undefined'){module.exports={categorize:categorize,parseCSV:parseCSV,parseOFX:parseOFX,parseAmt:parseAmt,parseDate:parseDate,fv:fv,taxIR:taxIR,tmiOf:tmiOf,perCap:perCap,perSaving:perSaving,donsCredit:donsCredit,domCredit:domCredit,gardeCredit:gardeCredit,partsOf:partsOf,taxFull:taxFull,abatt10:abatt10,loanPmt:loanPmt,loanCRD:loanCRD,loanMonthsLeft:loanMonthsLeft,keyOf:keyOf,extractBuyDate:extractBuyDate,canon:canon,defaultCats:defaultCats,labelKey:labelKey,tokens:tokens,merchHit:merchHit,cleanLabel:cleanLabel,signFor:signFor};return;}
 
 var $=function(s,r){return (r||document).querySelector(s);};
 var $$=function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s));};
@@ -528,7 +542,7 @@ function defaults(){
     cats:defaultCats(),subRole:{},tx:sampleTx(),merch:[],dead:{},budgets:{},example:true,
     annual:[{id:'a1',name:'Taxe foncière',amount:1100,month:10,on:true,ex:true},{id:'a2',name:'Assurance auto',amount:480,month:3,on:true,ex:true},{id:'a3',name:'Vacances d’été',amount:1200,month:7,on:true,ex:true},{id:'a4',name:'Cadeaux de fin d’année',amount:300,month:12,on:true,ex:true}],
     accounts:[{id:'c1',name:'Compte courant',type:'courant',amount:1850,ex:true},{id:'c2',name:'Livret A',type:'livretA',amount:4200,ex:true},{id:'c3',name:'LDDS',type:'ldds',amount:1500,ex:true},{id:'c4',name:'Assurance-vie',type:'av',amount:6000,ex:true},{id:'c5',name:'PEA',type:'pea',amount:3000,ex:true}],
-    goals:[{id:'g1',name:'Vacances d’été',target:1200,saved:350,monthly:100,ex:true}],
+    dateMode:'buy',goals:[{id:'g1',name:'Vacances d’été',target:1200,saved:350,monthly:100,ex:true}],
     levers:{per:1200,dons:200,dom:0,garde:0},steps:[false,false,false,false],best:0,
     banks:[{id:'b1',name:'Compte courant',bank:'',count:true,anchorDate:'',anchorBal:null}],loans:[],taxNature:{},
     fisc:{sal:[],primes:[],ratio:0.79,pas:13,other:0,otherPas:0,fraisReels:0,year:new Date().getFullYear()}};
@@ -547,7 +561,7 @@ function normalizeState(o){
     if(!have.income&&!have.extra){d.cats.push(sys.find(function(c){return c.name==='Revenu';}));}
   }
   if(o.subRole&&typeof o.subRole==='object'){Object.keys(o.subRole).forEach(function(k){if(ROLES[o.subRole[k]])d.subRole[k]=o.subRole[k];});}
-  if(Array.isArray(o.tx))d.tx=o.tx.filter(function(t){return t&&typeof t.date==='string'&&typeof t.amount==='number'&&typeof t.cat==='string';}).map(function(t){return {id:t.id||uid(),date:t.date,label:String(t.label==null?'':t.label),amount:t.amount,cat:t.cat,sub:String(t.sub||''),ex:!!t.ex,man:!!t.man,raw:t.raw?String(t.raw):'',bk:t.bk?String(t.bk):'',acct:t.acct?String(t.acct):''};});
+  if(Array.isArray(o.tx))d.tx=o.tx.filter(function(t){return t&&typeof t.date==='string'&&typeof t.amount==='number'&&typeof t.cat==='string';}).map(function(t){return {id:t.id||uid(),date:t.date,label:String(t.label==null?'':t.label),amount:t.amount,cat:t.cat,sub:String(t.sub||''),ex:!!t.ex,man:!!t.man,raw:t.raw?String(t.raw):'',bk:t.bk?String(t.bk):'',acct:t.acct?String(t.acct):'',opDate:typeof t.opDate==='string'?t.opDate:'',buyDate:typeof t.buyDate==='string'?t.buyDate:''};});
   if(Array.isArray(o.merch)){d.merch=o.merch.filter(function(m){return m&&typeof m.match==='string'&&m.match&&typeof m.cat==='string';}).map(function(m){return {id:m.id||mid(),match:m.match,name:String(m.name||''),cat:m.cat,sub:String(m.sub||''),auto:m.auto?1:0,mode:m.mode==='same'?'same':'word'};});}
   else if(o.rules&&typeof o.rules==='object'){Object.keys(o.rules).forEach(function(k){var r=o.rules[k],c=typeof r==='string'?r:(r&&r.c);if(c)d.merch.push({id:mid(),match:k,name:'',cat:c,sub:(r&&r.s)||'',auto:1,mode:'word'});});}
   if(o.dead&&typeof o.dead==='object')d.dead=o.dead;
@@ -564,6 +578,11 @@ function normalizeState(o){
   if(o.taxNature&&typeof o.taxNature==='object'){Object.keys(o.taxNature).forEach(function(k){if(/^(salary|other|exempt)$/.test(o.taxNature[k]))d.taxNature[k]=o.taxNature[k];});}
   if(o.fisc&&typeof o.fisc==='object'){var f=o.fisc;d.fisc={sal:Array.isArray(f.sal)?f.sal.filter(function(x){return x&&/^\d{4}-\d{2}$/.test(x.from)&&+x.brut>=0;}).map(function(x){return {id:x.id||uid(),from:x.from,brut:+x.brut};}):[],primes:Array.isArray(f.primes)?f.primes.filter(function(x){return x&&/^\d{4}-\d{2}$/.test(x.month);}).map(function(x){return {id:x.id||uid(),month:x.month,brut:+x.brut||0,label:String(x.label||'')};}):[],ratio:(+f.ratio>0.4&&+f.ratio<1)?+f.ratio:0.79,pas:(+f.pas>=0&&+f.pas<=60)?+f.pas:13,other:+f.other||0,otherPas:+f.otherPas||0,fraisReels:+f.fraisReels||0,year:+f.year||new Date().getFullYear()};}
   if(!d.cats.some(function(c){return c.role==='transfer';}))d.cats.push(defaultCats().find(function(c){return c.role==='transfer';}));
+  d.dateMode=o.dateMode==='op'?'op':'buy';
+  d.tx.forEach(function(t){
+    if(t.raw&&!t.opDate){t.opDate=t.date;t.buyDate=extractBuyDate(t.raw,t.date)||'';}
+    if(t.opDate)t.date=(d.dateMode==='buy'&&t.buyDate)?t.buyDate:t.opDate;
+  });
   return d;
 }
 function migrateV2(o){
@@ -748,7 +767,7 @@ function dayDiff(a,b){return Math.round((Date.UTC(+a.slice(0,4),+a.slice(5,7)-1,
 function merchKw(t){return tokens(cleanLabel(t.raw||t.label)).slice(0,2).join(' ');}
 function txRow(t){
   if(editId===t.id)return editPanel(t);
-  return '<div class="txr"><span class="l">'+esc(t.label)+'</span><span class="a'+(t.amount>0?' in':'')+'">'+(t.amount>0?'+':'')+eur(t.amount,2)+'</span><div class="m"><span class="dot" style="background:'+colorOf(t.cat)+'"></span><span>'+new Date(t.date+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'})+'</span><span>'+esc(t.cat)+(t.sub?' › '+esc(t.sub):'')+'</span><button class="btn small" style="margin-left:auto;min-height:36px" data-action="edit" data-id="'+t.id+'" aria-label="Modifier '+esc(t.label)+'">Modifier</button></div></div>';
+  return '<div class="txr"><span class="l">'+esc(t.label)+'</span><span class="a'+(t.amount>0?' in':'')+'">'+(t.amount>0?'+':'')+eur(t.amount,2)+'</span><div class="m"><span class="dot" style="background:'+colorOf(t.cat)+'"></span><span>'+new Date(t.date+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'})+(t.opDate&&t.buyDate&&t.opDate!==t.buyDate?' <span class="muted small">('+(S.dateMode==='buy'?'débité le ':'achat le ')+new Date((S.dateMode==='buy'?t.opDate:t.buyDate)+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short'})+')</span>':'')+'</span><span>'+esc(t.cat)+(t.sub?' › '+esc(t.sub):'')+'</span><button class="btn small" style="margin-left:auto;min-height:36px" data-action="edit" data-id="'+t.id+'" aria-label="Modifier '+esc(t.label)+'">Modifier</button></div></div>';
 }
 function editPanel(t){
   var subs=allSubs(t.cat).slice(0,60),disp=cleanLabel(t.raw||t.label)||t.label,key=keyOf(t.raw||t.label),multi=S.banks.length>1;
@@ -1285,7 +1304,8 @@ function viewSettings(){
   h+='<div class="card"><h2>Mes chiffres</h2><label class="f">Revenu mensuel net du foyer (€)<input type="number" inputmode="decimal" min="0" data-set="income" data-t="n" value="'+S.income+'"></label><label class="f">Charges fixes mensuelles : loyer ou crédit, assurances, abonnements, énergie (€)<input type="number" inputmode="decimal" min="0" data-set="fixed" data-t="n" value="'+S.fixed+'"></label><label class="f">Épargne à mettre de côté chaque mois (€)<input type="number" inputmode="decimal" min="0" data-set="save" data-t="n" value="'+S.save+'"></label>'+
    '<div><button class="btn small" data-action="calibrate">Les calculer depuis mes opérations</button></div>'+(calibMsg?'<div class="note" role="status"><p>'+esc(calibMsg)+'</p></div>':'')+
    '<p class="small muted">Le calcul utilise vos 6 derniers mois complets (revenus réguliers et charges fixes) et la moyenne de vos virements d’épargne. Les frais annuels (taxe foncière, assurances annuelles, vacances) se gèrent dans Dépenses › Année.</p></div>';
-  h+='<div class="card"><h2>Mon profil</h2><p class="small muted">Il adapte les frais annuels proposés et les estimations d’impôt.</p><div class="row"><label class="f">Situation<select data-set="situation" data-t="s"><option value="seul"'+(S.situation==='seul'?' selected':'')+'>Seul(e)</option><option value="couple"'+(S.situation==='couple'?' selected':'')+'>En couple (déclaration commune)</option></select></label><label class="f">Enfants à charge<input type="number" min="0" max="8" data-set="kids" data-t="n" value="'+S.kids+'"></label><label class="f">dont de moins de 6 ans<input type="number" min="0" max="8" data-set="kids6" data-t="n" value="'+S.kids6+'"></label></div>'+
+  h+='<div class="card"><h2>Dates de mes opérations</h2><p class="small muted">Avec une carte à débit différé, la banque débite en fin de mois : la date de l’opération peut être décalée d’un mois par rapport à l’achat. Pour les opérations par carte, l’appli lit la vraie date d’achat dans le libellé (par exemple « CARTE X3134 08/09 » = 8 septembre).</p><label class="f">Date utilisée pour classer mes dépenses par mois<select data-set="dateMode" data-t="s"><option value="buy"'+(S.dateMode==='buy'?' selected':'')+'>Date d’achat (lue dans le libellé)</option><option value="op"'+(S.dateMode==='op'?' selected':'')+'>Date de l’opération (débit en banque)</option></select></label><p class="small muted">Le solde de votre compte utilise toujours la date de l’opération. Les virements, prélèvements et opérations sans date d’achat gardent la date de la banque. Vous pouvez changer à tout moment.</p></div>'+
+  '<div class="card"><h2>Mon profil</h2><p class="small muted">Il adapte les frais annuels proposés et les estimations d’impôt.</p><div class="row"><label class="f">Situation<select data-set="situation" data-t="s"><option value="seul"'+(S.situation==='seul'?' selected':'')+'>Seul(e)</option><option value="couple"'+(S.situation==='couple'?' selected':'')+'>En couple (déclaration commune)</option></select></label><label class="f">Enfants à charge<input type="number" min="0" max="8" data-set="kids" data-t="n" value="'+S.kids+'"></label><label class="f">dont de moins de 6 ans<input type="number" min="0" max="8" data-set="kids6" data-t="n" value="'+S.kids6+'"></label></div>'+
    '<label class="chk"><input type="checkbox" data-set="owner" data-t="b"'+(S.owner?' checked':'')+'> Je suis propriétaire</label><label class="chk"><input type="checkbox" data-set="car" data-t="b"'+(S.car?' checked':'')+'> J’ai un véhicule</label>'+
    '<label class="f">Revenu net imposable annuel du foyer (€), laissez 0 pour l’estimer<input type="number" min="0" inputmode="decimal" data-set="taxIncome" data-t="n" value="'+S.taxIncome+'"></label><p class="small muted">Vous le trouvez sur votre avis d’imposition, à la ligne « revenu fiscal de référence » ou « revenu net imposable ».</p></div>';
   var nUsed=S.cats.filter(function(c){return c.slot>0;}).length;
@@ -1318,7 +1338,7 @@ function defAcct(){return (curAcct&&bankById(curAcct))?curAcct:S.banks[0].id;}
 function bankBal(b){
   if(b.anchorBal===null||b.anchorBal===undefined||!b.anchorDate)return null;
   var s=b.anchorBal,first=S.banks[0].id;
-  S.tx.forEach(function(t){if(t.ex)return;if((t.acct||first)===b.id&&t.date>b.anchorDate)s+=t.amount;});
+  S.tx.forEach(function(t){if(t.ex)return;if((t.acct||first)===b.id&&(t.opDate||t.date)>b.anchorDate)s+=t.amount;});
   return s;
 }
 function curKnown(){return S.banks.some(function(b){return b.count&&bankBal(b)!==null;});}
@@ -1678,7 +1698,7 @@ function handleFile(file){
     var text=decode(rd.result),list;
     try{list=/<OFX|<STMTTRN/i.test(text)?parseOFX(text):parseCSV(text);}catch(e){list=[];}
     if(!list.length){importMsg='Aucune opération reconnue. Le fichier doit contenir une colonne date, un libellé (ou un nom) et un montant (ou débit et crédit).';render();return;}
-    var seen={},add=0,dup=0,rec=0,gone=0,occ={},before=S.cats.length,dead=S.dead||{},acctSel=defAcct(),pfx=acctSel===S.banks[0].id?'':acctSel+'|';
+    var seen={},add=0,dup=0,rec=0,gone=0,occ={},before=S.cats.length,dead=S.dead||{},nbd=0,acctSel=defAcct(),pfx=acctSel===S.banks[0].id?'':acctSel+'|';
     var hadEx=S.example;S.tx=S.tx.filter(function(t){return !t.ex;});S.example=false;
     if(hadEx){S.annual=S.annual.filter(function(a){return !a.ex;});S.accounts=S.accounts.filter(function(a){return !a.ex;});S.goals=S.goals.filter(function(g){return !g.ex;});}
     S.tx.forEach(function(t){if(t.bk)seen[t.bk]=1;});
@@ -1687,14 +1707,14 @@ function handleFile(file){
       var k0=o.date+'|'+o.label+'|'+o.amount;occ[k0]=(occ[k0]||0)+1;var bk=pfx+k0+'|'+occ[k0];
       if(seen[bk]){dup++;return;}
       if(dead[bk]){gone++;return;}
-      var best=null,bd=99;
-      pool.forEach(function(t){if(t.bk)return;if(Math.abs(Math.abs(t.amount)-Math.abs(o.amount))>0.005)return;var d=Math.abs(dayDiff(t.date,o.date));if(d<=5&&d<bd){bd=d;best=t;}});
-      if(best){best.bk=bk;best.raw=o.label;seen[bk]=1;rec++;return;}
+      var bd0=o.cat?'':extractBuyDate(o.label,o.date),best=null,bd=99;
+      pool.forEach(function(t){if(t.bk)return;if(Math.abs(Math.abs(t.amount)-Math.abs(o.amount))>0.005)return;var d=Math.abs(dayDiff(t.date,o.date));if(bd0)d=Math.min(d,Math.abs(dayDiff(t.date,bd0)));if(d<=5&&d<bd){bd=d;best=t;}});
+      if(best){best.bk=bk;best.raw=o.label;best.opDate=o.date;best.buyDate=bd0||best.date;seen[bk]=1;rec++;return;}
       var cat,sub,name,man=false,amount=o.amount;
       if(o.cat){ensureCat(o.cat);cat=o.cat;sub=o.sub||'';name=o.label;man=true;}
       else{var clean=cleanLabel(o.label,o.amount),r=categorize(o.label+' '+clean,o.amount,ctx(o.label));cat=r.cat;sub=r.sub;name=r.name||clean;ensureCat(cat,o.amount>0?'income':'var');}
       amount=signFor(S.cats,cat,o.amount);
-      S.tx.push({id:uid(),date:o.date,label:name,raw:o.label,amount:amount,cat:cat,sub:sub,man:man,bk:bk,acct:acctSel});seen[bk]=1;add++;
+      if(bd0)nbd++;S.tx.push({id:uid(),date:(S.dateMode==='buy'&&bd0)?bd0:o.date,opDate:o.date,buyDate:bd0||'',label:name,raw:o.label,amount:amount,cat:cat,sub:sub,man:man,bk:bk,acct:acctSel});seen[bk]=1;add++;
     });
     var anch=false,wb=list.filter(function(o){return o.bal!=null;});
     if(wb.length){
@@ -1703,7 +1723,7 @@ function handleFile(file){
     }
     var nT=linkTransfers(),newCats=S.cats.length-before;
     save();initView();shown=25;
-    importMsg=add+' opération'+(add>1?'s':'')+' importée'+(add>1?'s':'')+(rec?', '+rec+' rapprochée'+(rec>1?'s':'')+' de vos saisies manuelles (pas de doublon)':'')+(dup?', '+dup+' déjà présente'+(dup>1?'s':''):'')+(gone?', '+gone+' ignorée'+(gone>1?'s':'')+' car supprimée'+(gone>1?'s':'')+' par vous':'')+(anch?'. Le solde de « '+bankName(acctSel)+' » a été recalé d’après le fichier':'')+(nT?', '+nT+' virement'+(nT>1?'s':'')+' entre vos comptes repéré'+(nT>1?'s':'')+' (ni dépense ni revenu)':'')+(newCats>0?', '+newCats+' nouvelle'+(newCats>1?'s':'')+' catégorie'+(newCats>1?'s':'')+' créée'+(newCats>1?'s':''):'')+'. Vérifiez les noms et catégories, et corrigez avec « Modifier ».';
+    importMsg=add+' opération'+(add>1?'s':'')+' importée'+(add>1?'s':'')+(rec?', '+rec+' rapprochée'+(rec>1?'s':'')+' de vos saisies manuelles (pas de doublon)':'')+(dup?', '+dup+' déjà présente'+(dup>1?'s':''):'')+(gone?', '+gone+' ignorée'+(gone>1?'s':'')+' car supprimée'+(gone>1?'s':'')+' par vous':'')+(nbd?'. '+nbd+' date'+(nbd>1?'s':'')+' d’achat lue'+(nbd>1?'s':'')+' dans les libellés ('+(S.dateMode==='buy'?'utilisées pour classer vos opérations':'non utilisées : mode « date de l’opération »')+')':'')+(anch?'. Le solde de « '+bankName(acctSel)+' » a été recalé d’après le fichier':'')+(nT?', '+nT+' virement'+(nT>1?'s':'')+' entre vos comptes repéré'+(nT>1?'s':'')+' (ni dépense ni revenu)':'')+(newCats>0?', '+newCats+' nouvelle'+(newCats>1?'s':'')+' catégorie'+(newCats>1?'s':'')+' créée'+(newCats>1?'s':''):'')+'. Vérifiez les noms et catégories, et corrigez avec « Modifier ».';
     render();
   };
   rd.readAsArrayBuffer(file);
@@ -1830,7 +1850,7 @@ document.addEventListener('submit',function(e){
     var amt=parseAmt($('#ed-amt').value);if(!(amt>0)){toast('Saisissez un montant.');return;}
     var key0=keyOf(t.raw||t.label),scope=$('#ed-scope').value,pre0={id:t.id,cat:t.cat,sub:t.sub,label:t.label,amount:t.amount,date:t.date,acct:t.acct};
     var nl=$('#ed-label').value.trim()||t.label,cat=$('#ed-cat').value,sub=$('#ed-sub').value.trim(),ac=$('#ed-acct'),dr=$('#ed-dir');
-    t.label=nl;t.date=parseDate($('#ed-date').value)||t.date;t.cat=cat;t.sub=sub;t.man=true;t.ex=false;if(ac)t.acct=ac.value;
+    var od0=t.date;t.label=nl;t.date=parseDate($('#ed-date').value)||t.date;if(t.date!==od0&&t.opDate){if(S.dateMode==='buy')t.buyDate=t.date;else t.opDate=t.date;}t.cat=cat;t.sub=sub;t.man=true;t.ex=false;if(ac)t.acct=ac.value;
     t.amount=roleOfCat(S.cats,cat)==='transfer'?((dr&&dr.value==='in')?1:-1)*Math.abs(amt):signFor(S.cats,cat,Math.abs(amt));
     var match=scope==='same'?key0:(scope==='word'?mwords($('#ed-kw').value).join(' '):''),n=0,made=false;
     if(match&&scope!=='one'){var up=upsertMerch(match,nl,cat,sub,scope),res=applyMerch(up.m,t.id);n=res.n;made=true;setUndo('Règle « '+match+' » ('+(scope==='same'?'nom exact':'mot contenu')+') créée'+(n?' : '+n+' autre'+(n>1?'s':'')+' opération'+(n>1?'s':'')+' modifiée'+(n>1?'s':'')+'.':'.'),[pre0].concat(res.snaps),up.m,up.prev);}
@@ -1895,7 +1915,7 @@ document.addEventListener('change',function(e){
     var k=el.dataset.set,t=el.dataset.t;
     if(t==='n')S[k]=Math.max(0,parseAmt(el.value)||0);else if(t==='b')S[k]=el.checked;else S[k]=el.value;
     if(S.kids6>S.kids&&(k==='kids'||k==='kids6'))S.kids6=S.kids;
-    delete S.needsCalib;save();if(k==='kids'||k==='kids6')render();return;
+    delete S.needsCalib;if(k==='dateMode'){S.dateMode=el.value==='op'?'op':'buy';S.tx.forEach(function(t){if(t.opDate)t.date=(S.dateMode==='buy'&&t.buyDate)?t.buyDate:t.opDate;});save();initView();render();toast(S.dateMode==='buy'?'Dates d’achat utilisées.':'Dates d’opération utilisées.');return;}save();if(k==='kids'||k==='kids6')render();return;
   }
   if(el.dataset.catname!==undefined){
     var old=el.dataset.catname,nn=el.value.trim();
