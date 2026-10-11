@@ -1,6 +1,6 @@
 /* Compte sur Moi : fonctionnement hors ligne.
    Les pages se rechargent depuis le réseau quand il y en a un, sinon depuis le cache. */
-var CACHE = 'compte-sur-moi-v4';
+var CACHE = 'compte-sur-moi-v5';
 var CORE = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', function (e) {
